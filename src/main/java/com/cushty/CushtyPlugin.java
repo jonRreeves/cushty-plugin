@@ -48,8 +48,7 @@ import okhttp3.HttpUrl;
 @PluginDescriptor(
 	name = "Cushty",
 	description = "Share your drops, pets, and game-view screenshots with a clan Discord you configure",
-	tags = {"discord", "screenshot", "clan", "drops", "loot", "pet"},
-	enabledByDefault = false
+	tags = {"discord", "screenshot", "clan", "drops", "loot", "pet"}
 )
 public class CushtyPlugin extends Plugin
 {
