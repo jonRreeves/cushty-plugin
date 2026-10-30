@@ -52,4 +52,8 @@ Needs a JDK that can compile Java 11 (11 or 17 is fine).
 ./gradlew run
 ```
 
-`run` starts RuneLite in developer mode with Cushty loaded. Jagex accounts need the [RuneLite Jagex account guide](https://github.com/runelite/runelite/wiki/Using-Jagex-Accounts).
+`run` starts RuneLite in developer mode with this copy of Cushty loaded. It uses your normal `~/.runelite` profile, so turn off the Plugin Hub copy of Cushty before you enable anything. The hub copy would still post to Discord.
+
+Screenshots from this local client are written to `~/.runelite/screenshots/cushty/` and are not uploaded. The installed plugin does not run in developer mode, so it still posts as usual.
+
+A Jagex account logs in from the game login screen with the Jagex account button. That opens a browser, then returns to the client. If that login is unavailable, sign in once with the official RuneLite launcher, quit it, and run `./gradlew run` again. See the [RuneLite Jagex account guide](https://github.com/runelite/runelite/wiki/Using-Jagex-Accounts).

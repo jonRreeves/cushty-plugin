@@ -4,14 +4,18 @@ import com.cushty.api.CushtyApiClient;
 import com.cushty.api.EventPayload;
 import com.cushty.capture.CaptureArea;
 import com.cushty.capture.CaptureException;
+import com.cushty.capture.LocalShots;
 import com.cushty.capture.PrivateChatRedactor;
 import com.cushty.capture.ScreenshotCapture;
 import com.cushty.capture.SnipSelector;
 import com.cushty.loot.LootFilter;
 import com.cushty.pets.PetMessages;
 import com.google.inject.Provides;
+import com.google.inject.name.Named;
 import java.awt.Rectangle;
 import java.awt.image.BufferedImage;
+import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
@@ -42,6 +46,7 @@ import net.runelite.client.events.PlayerLootReceived;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.game.ItemStack;
 import net.runelite.client.input.KeyManager;
+import net.runelite.client.RuneLite;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.plugins.loottracker.LootReceived;
@@ -99,6 +104,11 @@ public class CushtyPlugin extends Plugin
 	@Inject
 	private CushtyApiClient api;
 
+	/** True only for {@code ./gradlew run}. The installed client never sets this, so it still posts. */
+	@Inject
+	@Named("developerMode")
+	private boolean developerMode;
+
 	private CushtyPanel panel;
 	private NavigationButton navButton;
 	private EventPayload pendingPet;
@@ -126,6 +136,7 @@ public class CushtyPlugin extends Plugin
 	{
 		panel = new CushtyPanel(caption -> sendManual(caption, true, null), this::onSnipButton, this::testConnection);
 		panel.setSendLabel(config.captureArea().buttonLabel());
+		panel.setDeveloperMode(developerMode);
 		BufferedImage icon = ImageUtil.loadImageResource(getClass(), "icon.png");
 		navButton = NavigationButton.builder()
 			.tooltip("Cushty")
@@ -176,7 +187,7 @@ public class CushtyPlugin extends Plugin
 			report("Turn on 'Enable manual screenshots' in the Cushty settings first.", true);
 			return;
 		}
-		if (!configured())
+		if (!developerMode && !configured())
 		{
 			report("Set an HTTPS server URL and token in the Cushty settings.", true);
 			return;
@@ -413,7 +424,7 @@ public class CushtyPlugin extends Plugin
 
 		final HttpUrl server = CushtyApiClient.parseServerUrl(config.serverUrl());
 		final String token = config.token().trim();
-		if (server == null || token.isEmpty())
+		if (!developerMode && (server == null || token.isEmpty()))
 		{
 			report("Set an HTTPS server URL and token in the Cushty settings.", true);
 			return;
@@ -447,6 +458,10 @@ public class CushtyPlugin extends Plugin
 						log.debug("Screenshot capture failed", error);
 						listener.onFailure(failureMessage(error));
 					}
+					else if (developerMode)
+					{
+						saveLocally(png, payload.getType(), listener);
+					}
 					else if (png.length > MAX_UPLOAD_BYTES)
 					{
 						listener.onFailure("Screenshot is too large to upload");
@@ -457,6 +472,20 @@ public class CushtyPlugin extends Plugin
 					}
 				});
 		});
+	}
+
+	private void saveLocally(byte[] png, String type, CushtyApiClient.ResultListener listener)
+	{
+		try
+		{
+			File saved = LocalShots.save(new File(RuneLite.SCREENSHOT_DIR, "cushty"), type, png);
+			listener.onSuccess("Saved to " + saved.getAbsolutePath());
+		}
+		catch (IOException e)
+		{
+			log.debug("Could not save local screenshot", e);
+			listener.onFailure("Could not save the screenshot");
+		}
 	}
 
 	private CushtyApiClient.ResultListener listener(boolean fromPanel)
