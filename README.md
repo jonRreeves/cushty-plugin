@@ -8,7 +8,9 @@ The plugin does not include a server, and it does not talk to Discord itself. Yo
 
 Each upload is one HTTPS request to the server URL you entered:
 
-- A PNG of the **RuneLite game view**. It is taken from the game canvas (`DrawManager`), so it is the game picture only: not your desktop, not other windows, and not the RuneLite sidebar. Anyone standing on screen is in the shot, the same as a normal screenshot.
+- A PNG of the **RuneLite game view**. It is taken from the game canvas (`DrawManager`), so it is the game picture only: not your desktop, not other windows, and not the RuneLite sidebar. Anyone standing in a full-screen shot is in it, the same as a normal screenshot.
+- **Capture area** chooses the whole game view or only the chatbox, for drops, pets, and the manual hotkey. **Snip** on the sidebar sends a rectangle you drag instead. That rectangle is still part of the game view.
+- **Hide private chat** leaves private messages out of every screenshot. Chat is redrawn without them for that one frame, then restored, and the split private-chat window is hidden for the same frame. Friends chat, clan chat, and login messages stay.
 - Your bearer token, so the server can tell which member you are. This is a token that server issued. It is not your Jagex password, email, or session.
 - Your current world, when you are logged in.
 - Your RSN, when **Include RSN** is on. That option defaults to on. Turn it off and posts use your Discord name.
@@ -17,7 +19,7 @@ What else is included depends on the event:
 
 | Event | When it sends | Extra fields |
 | --- | --- | --- |
-| Manual screenshot | You press the hotkey, or Send on the sidebar | Optional caption you typed (500 characters) |
+| Manual screenshot | You press the hotkey, or Full screen / Chatbox / Snip on the sidebar | Optional caption you typed (500 characters). Snip is the area you drag. The other button follows Capture area. |
 | Valuable drop | A stack in the drop is worth at least your minimum (5M gp or more, Grand Exchange price) | Item id, name, quantity, GE price, and the drop source. On a player kill the source is that player's name, because that is the name on the loot event. |
 | Pet | The game announces a pet, including a duplicate | Duplicate or not, and the game message |
 
@@ -36,7 +38,7 @@ Every feature that uploads defaults to off. Turning one on asks you to confirm t
 1. Get a server URL and a bearer token from whoever runs your clan's server.
 2. In RuneLite, open **Configuration → Cushty**.
 3. Paste **Server URL** and **Token**.
-4. Turn on the features you want and confirm the warning.
+4. Turn on the features you want and confirm the warning. Under **Capture**, choose the whole game view or the chatbox, and whether private messages are left out.
 5. Open the Cushty sidebar and click **Test connection**. It should say you are connected as your Discord name.
 
 The drop minimum cannot be set below 5,000,000 gp. Values already saved below that are raised to 5M when a drop is checked.

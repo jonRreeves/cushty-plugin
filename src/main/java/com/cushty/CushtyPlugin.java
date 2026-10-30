@@ -2,18 +2,25 @@ package com.cushty;
 
 import com.cushty.api.CushtyApiClient;
 import com.cushty.api.EventPayload;
+import com.cushty.capture.CaptureArea;
+import com.cushty.capture.CaptureException;
+import com.cushty.capture.PrivateChatRedactor;
 import com.cushty.capture.ScreenshotCapture;
+import com.cushty.capture.SnipSelector;
 import com.cushty.loot.LootFilter;
 import com.cushty.pets.PetMessages;
 import com.google.inject.Provides;
+import java.awt.Rectangle;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutionException;
 import javax.inject.Inject;
+import javax.swing.SwingUtilities;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
@@ -21,6 +28,7 @@ import net.runelite.api.GameState;
 import net.runelite.api.Player;
 import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameTick;
+import net.runelite.api.events.ScriptCallbackEvent;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.chat.ChatColorType;
 import net.runelite.client.chat.ChatMessageBuilder;
@@ -28,6 +36,7 @@ import net.runelite.client.chat.ChatMessageManager;
 import net.runelite.client.chat.QueuedMessage;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
+import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.events.NpcLootReceived;
 import net.runelite.client.events.PlayerLootReceived;
 import net.runelite.client.game.ItemManager;
@@ -82,19 +91,27 @@ public class CushtyPlugin extends Plugin
 	private ScreenshotCapture screenshotCapture;
 
 	@Inject
+	private PrivateChatRedactor privateChat;
+
+	@Inject
+	private SnipSelector snipSelector;
+
+	@Inject
 	private CushtyApiClient api;
 
 	private CushtyPanel panel;
 	private NavigationButton navButton;
 	private EventPayload pendingPet;
 	private int pendingPetTicks;
+	/** Snip was requested and the mouse grab has not been installed yet. */
+	private volatile boolean snipPending;
 
 	private final HotkeyListener hotkeyListener = new HotkeyListener(() -> config.screenshotHotkey())
 	{
 		@Override
 		public void hotkeyPressed()
 		{
-			sendManual(null, false);
+			sendManual(null, false, null);
 		}
 	};
 
@@ -107,7 +124,8 @@ public class CushtyPlugin extends Plugin
 	@Override
 	protected void startUp()
 	{
-		panel = new CushtyPanel(caption -> sendManual(caption, true), this::testConnection);
+		panel = new CushtyPanel(caption -> sendManual(caption, true, null), this::onSnipButton, this::testConnection);
+		panel.setSendLabel(config.captureArea().buttonLabel());
 		BufferedImage icon = ImageUtil.loadImageResource(getClass(), "icon.png");
 		navButton = NavigationButton.builder()
 			.tooltip("Cushty")
@@ -117,12 +135,19 @@ public class CushtyPlugin extends Plugin
 			.build();
 		clientToolbar.addNavigation(navButton);
 		keyManager.registerKeyListener(hotkeyListener);
+		keyManager.registerKeyListener(snipSelector.keys());
+		snipSelector.registerMouse();
 	}
 
 	@Override
 	protected void shutDown()
 	{
+		snipPending = false;
+		snipSelector.dismiss();
+		screenshotCapture.releaseRedaction();
 		keyManager.unregisterKeyListener(hotkeyListener);
+		keyManager.unregisterKeyListener(snipSelector.keys());
+		snipSelector.unregisterMouse();
 		clientToolbar.removeNavigation(navButton);
 		navButton = null;
 		panel = null;
@@ -131,7 +156,84 @@ public class CushtyPlugin extends Plugin
 
 	// ---- Manual screenshots -------------------------------------------------------------------
 
-	private void sendManual(String caption, boolean fromPanel)
+	private void onSnipButton()
+	{
+		if (snipSelector.isActive() || snipPending)
+		{
+			snipPending = false;
+			if (snipSelector.isActive())
+			{
+				snipSelector.cancel();
+			}
+			else
+			{
+				onSnipCancel();
+			}
+			return;
+		}
+		if (!config.manualEnabled())
+		{
+			report("Turn on 'Enable manual screenshots' in the Cushty settings first.", true);
+			return;
+		}
+		if (!configured())
+		{
+			report("Set an HTTPS server URL and token in the Cushty settings.", true);
+			return;
+		}
+		snipPending = true;
+		CushtyPanel current = panel;
+		if (current != null)
+		{
+			current.setSnipping(true);
+			current.setHint("Drag a box on the game view. Esc cancels.");
+		}
+		// Register the mouse grab on the client thread, outside mouse dispatch.
+		clientThread.invokeLater(() ->
+		{
+			if (!snipPending)
+			{
+				return;
+			}
+			snipPending = false;
+			snipSelector.start(this::onSnipReady, this::onSnipCancel, this::onSnipHint);
+		});
+	}
+
+	private void onSnipReady(Rectangle area)
+	{
+		SwingUtilities.invokeLater(() ->
+		{
+			CushtyPanel current = panel;
+			if (current == null)
+			{
+				return;
+			}
+			current.setSnipping(false);
+			sendManual(current.caption(), true, area);
+		});
+	}
+
+	private void onSnipCancel()
+	{
+		CushtyPanel current = panel;
+		if (current != null)
+		{
+			current.setSnipping(false);
+			current.setHint("Snip cancelled.");
+		}
+	}
+
+	private void onSnipHint(String message)
+	{
+		CushtyPanel current = panel;
+		if (current != null)
+		{
+			current.setHint(message);
+		}
+	}
+
+	private void sendManual(String caption, boolean fromPanel, Rectangle snip)
 	{
 		if (!config.manualEnabled())
 		{
@@ -142,7 +244,27 @@ public class CushtyPlugin extends Plugin
 			.type(EventPayload.TYPE_MANUAL)
 			.caption(caption == null || caption.isBlank() ? null : caption)
 			.build();
-		send(payload, fromPanel);
+		send(payload, fromPanel, snip);
+	}
+
+	private boolean configured()
+	{
+		HttpUrl server = CushtyApiClient.parseServerUrl(config.serverUrl());
+		return server != null && !config.token().trim().isEmpty();
+	}
+
+	private static String failureMessage(Throwable error)
+	{
+		Throwable cause = error;
+		while ((cause instanceof CompletionException || cause instanceof ExecutionException) && cause.getCause() != null)
+		{
+			cause = cause.getCause();
+		}
+		if (cause instanceof CaptureException)
+		{
+			return cause.getMessage();
+		}
+		return "Could not capture a screenshot";
 	}
 
 	private void testConnection()
@@ -212,7 +334,7 @@ public class CushtyPlugin extends Plugin
 		send(EventPayload.builder()
 			.type(EventPayload.TYPE_LOOT)
 			.loot(new EventPayload.Loot(name, result.getItems(), result.getTotalValue()))
-			.build(), false);
+			.build(), false, null);
 	}
 
 	// ---- Pets ---------------------------------------------------------------------------------
@@ -244,7 +366,27 @@ public class CushtyPlugin extends Plugin
 		{
 			EventPayload pet = pendingPet;
 			pendingPet = null;
-			send(pet, false);
+			send(pet, false, null);
+		}
+	}
+
+	@Subscribe
+	public void onScriptCallbackEvent(ScriptCallbackEvent event)
+	{
+		privateChat.onScriptCallback(event, client);
+	}
+
+	@Subscribe
+	public void onConfigChanged(ConfigChanged event)
+	{
+		if (!CushtyConfig.GROUP.equals(event.getGroup()) || !"captureArea".equals(event.getKey()))
+		{
+			return;
+		}
+		CushtyPanel current = panel;
+		if (current != null)
+		{
+			current.setSendLabel(config.captureArea().buttonLabel());
 		}
 	}
 
@@ -255,10 +397,22 @@ public class CushtyPlugin extends Plugin
 	 *
 	 * @param fromPanel whether the sidebar panel should show progress and clear its caption
 	 */
-	private void send(EventPayload payload, boolean fromPanel)
+	private void send(EventPayload payload, boolean fromPanel, Rectangle snip)
 	{
-		HttpUrl server = CushtyApiClient.parseServerUrl(config.serverUrl());
-		String token = config.token().trim();
+		// A selection box would be drawn into the next frame, so drop snip mode before capturing.
+		if (snipSelector.isActive() || snipPending)
+		{
+			snipPending = false;
+			snipSelector.dismiss();
+			CushtyPanel snipPanel = panel;
+			if (snipPanel != null)
+			{
+				snipPanel.setSnipping(false);
+			}
+		}
+
+		final HttpUrl server = CushtyApiClient.parseServerUrl(config.serverUrl());
+		final String token = config.token().trim();
 		if (server == null || token.isEmpty())
 		{
 			report("Set an HTTPS server URL and token in the Cushty settings.", true);
@@ -284,14 +438,14 @@ public class CushtyPlugin extends Plugin
 			}
 
 			CushtyApiClient.ResultListener listener = listener(fromPanel);
-			screenshotCapture.captureNextFrame()
-				.orTimeout(10, TimeUnit.SECONDS)
+			boolean chatbox = snip == null && config.captureArea() == CaptureArea.CHATBOX;
+			screenshotCapture.capture(snip, chatbox, config.hidePrivateChat())
 				.whenComplete((png, error) ->
 				{
 					if (error != null)
 					{
 						log.debug("Screenshot capture failed", error);
-						listener.onFailure("Could not capture a screenshot");
+						listener.onFailure(failureMessage(error));
 					}
 					else if (png.length > MAX_UPLOAD_BYTES)
 					{

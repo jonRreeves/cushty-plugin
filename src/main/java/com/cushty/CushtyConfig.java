@@ -1,5 +1,6 @@
 package com.cushty;
 
+import com.cushty.capture.CaptureArea;
 import com.cushty.loot.LootFilter;
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
@@ -23,23 +24,30 @@ public interface CushtyConfig extends Config
 	String connectionSection = "connection";
 
 	@ConfigSection(
+		name = "Capture",
+		description = "What is included in every screenshot: drops, pets, and manual shots",
+		position = 1
+	)
+	String captureSection = "capture";
+
+	@ConfigSection(
 		name = "Screenshots",
 		description = "Manual screenshots",
-		position = 1
+		position = 2
 	)
 	String screenshotSection = "screenshots";
 
 	@ConfigSection(
 		name = "Valuable drops",
 		description = "Automatically share valuable drops",
-		position = 2
+		position = 3
 	)
 	String lootSection = "loot";
 
 	@ConfigSection(
 		name = "Pets",
 		description = "Automatically share pet drops",
-		position = 3
+		position = 4
 	)
 	String petSection = "pets";
 
@@ -93,9 +101,33 @@ public interface CushtyConfig extends Config
 	}
 
 	@ConfigItem(
+		keyName = "hidePrivateChat",
+		name = "Hide private chat",
+		description = "Leave private messages out of every screenshot. Chat is redrawn without them for the captured frame, then restored. The split private-chat window is hidden for that frame too.",
+		section = captureSection,
+		position = 0
+	)
+	default boolean hidePrivateChat()
+	{
+		return false;
+	}
+
+	@ConfigItem(
+		keyName = "captureArea",
+		name = "Capture area",
+		description = "Entire screen is the game view. Chatbox is only the chatbox. A manual snip uses the area you drag instead.",
+		section = captureSection,
+		position = 1
+	)
+	default CaptureArea captureArea()
+	{
+		return CaptureArea.ENTIRE_SCREEN;
+	}
+
+	@ConfigItem(
 		keyName = "manualEnabled",
 		name = "Enable manual screenshots",
-		description = "Send a screenshot of the game with the hotkey or the sidebar panel",
+		description = "Send a screenshot with the hotkey or the sidebar. Snip drags a region of the game view. The other button uses Capture area.",
 		warning = THIRD_PARTY_WARNING,
 		section = screenshotSection,
 		position = 0
@@ -108,7 +140,7 @@ public interface CushtyConfig extends Config
 	@ConfigItem(
 		keyName = "screenshotHotkey",
 		name = "Screenshot hotkey",
-		description = "Hotkey that sends a screenshot immediately",
+		description = "Hotkey that sends a screenshot of the capture area immediately",
 		section = screenshotSection,
 		position = 1
 	)
