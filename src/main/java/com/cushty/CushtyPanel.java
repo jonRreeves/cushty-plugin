@@ -25,7 +25,6 @@ class CushtyPanel extends PluginPanel
 	private final JButton sendButton = new JButton("Full screen");
 	private final JButton snipButton = new JButton("Snip");
 	private final JButton testButton = new JButton("Test connection");
-	private final JLabel devBanner = new JLabel("<html>Developer mode. Screenshots are saved on this computer and are not posted.</html>");
 	private final JLabel status = new JLabel();
 	private boolean busy;
 	private boolean snipping;
@@ -39,10 +38,6 @@ class CushtyPanel extends PluginPanel
 		title.setFont(FontManager.getRunescapeBoldFont());
 		title.setForeground(Color.WHITE);
 
-		devBanner.setVisible(false);
-		devBanner.setFont(FontManager.getRunescapeSmallFont());
-		devBanner.setForeground(new Color(255, 176, 64));
-
 		JLabel captionLabel = new JLabel("Caption (optional)");
 		captionLabel.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
 
@@ -53,12 +48,8 @@ class CushtyPanel extends PluginPanel
 		JScrollPane captionScroll = new JScrollPane(caption);
 		captionScroll.setBorder(BorderFactory.createLineBorder(ColorScheme.MEDIUM_GRAY_COLOR));
 
-		JPanel heading = new JPanel(new BorderLayout(0, 4));
-		heading.add(title, BorderLayout.NORTH);
-		heading.add(devBanner, BorderLayout.SOUTH);
-
 		JPanel top = new JPanel(new BorderLayout(0, 6));
-		top.add(heading, BorderLayout.NORTH);
+		top.add(title, BorderLayout.NORTH);
 		top.add(captionLabel, BorderLayout.CENTER);
 		top.add(captionScroll, BorderLayout.SOUTH);
 
@@ -80,12 +71,6 @@ class CushtyPanel extends PluginPanel
 
 		add(top, BorderLayout.NORTH);
 		add(bottom, BorderLayout.CENTER);
-	}
-
-	/** Safe to call from any thread. */
-	void setDeveloperMode(boolean enabled)
-	{
-		SwingUtilities.invokeLater(() -> devBanner.setVisible(enabled));
 	}
 
 	/** Label for the non-snip button. Matches the capture-area setting. Safe from any thread. */
