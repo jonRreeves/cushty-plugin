@@ -6,11 +6,6 @@ import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.GridLayout;
-import java.time.Instant;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
-import java.util.Comparator;
-import java.util.List;
 import java.util.function.Consumer;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
@@ -34,9 +29,6 @@ import net.runelite.client.ui.PluginPanel;
 class CushtyPanel extends PluginPanel
 {
 	private static final int MAX_CAPTION = 500;
-	private static final int HISTORY_LIMIT = 8;
-	private static final DateTimeFormatter HISTORY_TIME =
-		DateTimeFormatter.ofPattern("HH:mm").withZone(ZoneId.systemDefault());
 
 	private final JTextArea caption = new JTextArea(3, 20);
 	private final JButton sendButton = new JButton("Full screen");
@@ -230,7 +222,7 @@ class CushtyPanel extends PluginPanel
 	{
 		SwingUtilities.invokeLater(() ->
 		{
-			bingoBoard.setText(formatBingo(board, history));
+			bingoBoard.setText(BingoFormat.formatBoard(board, history));
 			bingoBoard.setCaretPosition(0);
 		});
 	}
@@ -254,92 +246,6 @@ class CushtyPanel extends PluginPanel
 	{
 		status.setText("<html>" + escape(message) + "</html>");
 		status.setForeground(color);
-	}
-
-	private static String formatBingo(BingoModels.Board board, BingoModels.History history)
-	{
-		List<BingoModels.Tile> tiles = board.getTiles();
-		tiles.sort(Comparator.comparingInt(BingoModels.Tile::getY).thenComparingInt(BingoModels.Tile::getX));
-		long done = tiles.stream().filter(BingoModels.Tile::isComplete).count();
-
-		StringBuilder sb = new StringBuilder();
-		sb.append(board.getEventName()).append('\n');
-		sb.append(board.getTeamName())
-			.append(" - ")
-			.append(board.getWidth())
-			.append('x')
-			.append(board.getHeight())
-			.append('\n');
-		sb.append(done).append('/').append(tiles.size()).append(" tiles done\n\n");
-
-		int n = 1;
-		for (BingoModels.Tile tile : tiles)
-		{
-			sb.append(tile.isComplete() ? "[x] " : "[ ] ")
-				.append("Tile ")
-				.append(n++)
-				.append(" - ")
-				.append(tile.getName())
-				.append('\n');
-		}
-
-		sb.append("\nRecent\n");
-		sb.append(formatHistory(history, tiles));
-		return sb.toString().trim();
-	}
-
-	private static String formatHistory(BingoModels.History history, List<BingoModels.Tile> tiles)
-	{
-		if (history == null || history.getEntries() == null || history.getEntries().isEmpty())
-		{
-			return "No activity yet.";
-		}
-		StringBuilder sb = new StringBuilder();
-		int shown = 0;
-		for (BingoModels.HistoryEntry entry : history.getEntries())
-		{
-			if (shown >= HISTORY_LIMIT)
-			{
-				break;
-			}
-			if ("REVERSED".equalsIgnoreCase(entry.getStatus()))
-			{
-				continue;
-			}
-			String when = HISTORY_TIME.format(Instant.ofEpochMilli(entry.getCreatedAt()));
-			int tileNum = tileNumber(tiles, entry.getX(), entry.getY());
-			String line;
-			if (entry.getItemId() == 0)
-			{
-				line = when + " - Tile " + tileNum + " marked done";
-			}
-			else
-			{
-				String item = entry.getItemName() != null ? entry.getItemName() : ("item " + entry.getItemId());
-				line = when + " - +" + entry.getQuantity() + " " + item + " - Tile " + tileNum;
-			}
-			sb.append("- ").append(line).append('\n');
-			shown++;
-		}
-		if (shown == 0)
-		{
-			return "No activity yet.";
-		}
-		return sb.toString().trim();
-	}
-
-	private static int tileNumber(List<BingoModels.Tile> tiles, int x, int y)
-	{
-		int n = 1;
-		for (BingoModels.Tile tile : tiles)
-		{
-			if (tile.getX() == x && tile.getY() == y)
-			{
-				return n;
-			}
-			n++;
-		}
-		return Math.max(1, y * 10 + x + 1);
 	}
 
 	private static String escape(String text)
