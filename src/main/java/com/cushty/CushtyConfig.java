@@ -51,6 +51,13 @@ public interface CushtyConfig extends Config
 	)
 	String petSection = "pets";
 
+	@ConfigSection(
+		name = "Bingo",
+		description = "Clan bingo: watch server-configured tile items (including low-value) and show your team board",
+		position = 5
+	)
+	String bingoSection = "bingo";
+
 	@ConfigItem(
 		keyName = "serverUrl",
 		name = "Server URL",
@@ -185,6 +192,19 @@ public interface CushtyConfig extends Config
 		position = 0
 	)
 	default boolean petsEnabled()
+	{
+		return false;
+	}
+
+	@ConfigItem(
+		keyName = "bingoEnabled",
+		name = "Enable bingo",
+		description = "Fetch your team's bingo watchlist and board from the server. Matching loot (any value) is submitted like a drop. You must already be assigned to a team in Discord.",
+		warning = THIRD_PARTY_WARNING,
+		section = bingoSection,
+		position = 0
+	)
+	default boolean bingoEnabled()
 	{
 		return false;
 	}

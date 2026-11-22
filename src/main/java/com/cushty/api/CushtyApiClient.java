@@ -46,6 +46,13 @@ public class CushtyApiClient
 		void onFailure(String message);
 	}
 
+	public interface ValueListener<T>
+	{
+		void onSuccess(T value);
+
+		void onFailure(String message);
+	}
+
 	/**
 	 * Validates the configured server URL. HTTPS is required so tokens and screenshots are never
 	 * sent in the clear; plain HTTP is only allowed for a bot running on this machine.
@@ -99,6 +106,97 @@ public class CushtyApiClient
 		});
 	}
 
+	public void fetchWatchlist(HttpUrl server, String token, ValueListener<BingoModels.Watchlist> listener)
+	{
+		Request request = new Request.Builder()
+			.url(server.newBuilder().addPathSegments("v1/bingo/watchlist").build())
+			.header("Authorization", "Bearer " + token)
+			.get()
+			.build();
+
+		http.newCall(request).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.debug("Bingo watchlist request failed", e);
+				listener.onFailure("Could not reach the Cushty server");
+			}
+
+			@Override
+			public void onResponse(Call call, Response response)
+			{
+				try (ResponseBody responseBody = response.body())
+				{
+					if (response.code() == 404)
+					{
+						// Bot without bingo enabled.
+						BingoModels.Watchlist empty = new BingoModels.Watchlist();
+						empty.setActive(false);
+						listener.onSuccess(empty);
+						return;
+					}
+					String raw = responseBody != null ? responseBody.string() : null;
+					if (!response.isSuccessful())
+					{
+						listener.onFailure(messageFrom(raw, response.code()));
+						return;
+					}
+					BingoModels.Watchlist watchlist = gson.fromJson(raw, BingoModels.Watchlist.class);
+					listener.onSuccess(watchlist != null ? watchlist : new BingoModels.Watchlist());
+				}
+				catch (IOException | JsonParseException e)
+				{
+					listener.onFailure("Could not read bingo watchlist");
+				}
+			}
+		});
+	}
+
+	public void fetchBoard(HttpUrl server, String token, ValueListener<BingoModels.Board> listener)
+	{
+		Request request = new Request.Builder()
+			.url(server.newBuilder().addPathSegments("v1/bingo/board").build())
+			.header("Authorization", "Bearer " + token)
+			.get()
+			.build();
+
+		http.newCall(request).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.debug("Bingo board request failed", e);
+				listener.onFailure("Could not reach the Cushty server");
+			}
+
+			@Override
+			public void onResponse(Call call, Response response)
+			{
+				try (ResponseBody responseBody = response.body())
+				{
+					String raw = responseBody != null ? responseBody.string() : null;
+					if (!response.isSuccessful())
+					{
+						listener.onFailure(messageFrom(raw, response.code()));
+						return;
+					}
+					BingoModels.Board board = gson.fromJson(raw, BingoModels.Board.class);
+					if (board == null)
+					{
+						listener.onFailure("Empty bingo board response");
+						return;
+					}
+					listener.onSuccess(board);
+				}
+				catch (IOException | JsonParseException e)
+				{
+					listener.onFailure("Could not read bingo board");
+				}
+			}
+		});
+	}
+
 	private void execute(Request request, ResultListener listener, Consumer<JsonObject> onOk)
 	{
 		http.newCall(request).enqueue(new Callback()
@@ -144,5 +242,25 @@ public class CushtyApiClient
 		{
 			return null;
 		}
+	}
+
+	private String messageFrom(String raw, int code)
+	{
+		if (raw != null && !raw.isBlank())
+		{
+			try
+			{
+				JsonObject json = gson.fromJson(raw, JsonObject.class);
+				if (json != null && json.has("message"))
+				{
+					return json.get("message").getAsString();
+				}
+			}
+			catch (JsonParseException ignored)
+			{
+				// fall through
+			}
+		}
+		return "Server returned HTTP " + code;
 	}
 }

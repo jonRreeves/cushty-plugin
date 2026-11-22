@@ -53,4 +53,15 @@ public class LootFilterTest
 		assertEquals(LootFilter.MAX_ITEMS, result.getItems().size());
 		assertEquals("Item 39", result.getItems().get(0).getName());
 	}
+
+	@Test
+	public void includesWatchlistItemsUnderThreshold()
+	{
+		LootFilter filter = new LootFilter(LootFilter.MIN_STACK_VALUE, List.of(526));
+		LootFilter.Result result = filter.select(List.of(
+			new LootItem(526, "Bones", 1, 0),
+			new LootItem(2, "Cheap junk", 1, 100)));
+
+		assertEquals(List.of("Bones"), names(result));
+	}
 }
