@@ -9,6 +9,7 @@ import com.cushty.capture.PrivateChatRedactor;
 import com.cushty.capture.ScreenshotCapture;
 import com.cushty.capture.SnipSelector;
 import com.cushty.loot.LootFilter;
+import com.cushty.loot.UntradeableDrops;
 import com.cushty.pets.PetMessages;
 import com.google.inject.Provides;
 import java.awt.Rectangle;
@@ -19,10 +20,8 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
-import java.util.stream.Collectors;
 import javax.inject.Inject;
 import javax.swing.SwingUtilities;
 import lombok.extern.slf4j.Slf4j;
@@ -111,7 +110,8 @@ public class CushtyPlugin extends Plugin
 	private int pendingPetTicks;
 	/** Snip was requested and the mouse grab has not been installed yet. */
 	private volatile boolean snipPending;
-	private volatile Set<Integer> bingoWatchIds = Set.of();
+	/** Bingo watchlist from the server: item id → display name. */
+	private volatile Map<Integer, String> bingoWatchById = Map.of();
 	private int bingoWatchlistTicks;
 
 	private final HotkeyListener hotkeyListener = new HotkeyListener(() -> config.screenshotHotkey())
@@ -166,7 +166,7 @@ public class CushtyPlugin extends Plugin
 		navButton = null;
 		panel = null;
 		pendingPet = null;
-		bingoWatchIds = Set.of();
+		bingoWatchById = Map.of();
 	}
 
 	// ---- Manual screenshots -------------------------------------------------------------------
@@ -311,8 +311,12 @@ public class CushtyPlugin extends Plugin
 	@Subscribe
 	public void onLootReceived(LootReceived event)
 	{
-		// NPC and player kills arrive via the events above; this covers chests, raids, pickpockets etc.
-		if (event.getType() == LootRecordType.EVENT || event.getType() == LootRecordType.PICKPOCKET)
+		// NPC/player kills use the handlers above. EVENT/PICKPOCKET/UNKNOWN cover chests,
+		// raids, reward pools, and odd sources the loot tracker does not classify.
+		LootRecordType type = event.getType();
+		if (type == LootRecordType.EVENT
+			|| type == LootRecordType.PICKPOCKET
+			|| type == LootRecordType.UNKNOWN)
 		{
 			handleLoot(event.getName(), event.getItems());
 		}
@@ -340,14 +344,19 @@ public class CushtyPlugin extends Plugin
 			quantity,
 			itemManager.getItemPrice(id))));
 
-		Set<Integer> watch = bingoOn ? bingoWatchIds : Set.of();
+		Map<Integer, String> watchMap = bingoOn ? bingoWatchById : Map.of();
 		// Valuable-drop threshold only applies when loot is enabled; bingo-only mode still
 		// submits watchlist hits under 5M.
 		long minValue = lootOn ? config.lootMinValue() : Long.MAX_VALUE;
-		LootFilter filter = new LootFilter(minValue, watch);
+		LootFilter filter = new LootFilter(minValue, watchMap.keySet());
 		LootFilter.Result result = filter.select(drop);
 		if (result.isEmpty())
 		{
+			if (bingoOn)
+			{
+				log.debug("Loot ignored (not valuable / not on bingo watchlist of {}): {}",
+					watchMap.size(), quantities.keySet());
+			}
 			return;
 		}
 
@@ -358,16 +367,63 @@ public class CushtyPlugin extends Plugin
 			.build(), false, null);
 	}
 
-	// ---- Pets ---------------------------------------------------------------------------------
+	/** Aerial fishing etc. announce {@code Untradeable drop: X} without a usable loot event. */
+	private void handleUntradeableBingoDrop(String itemName)
+	{
+		Integer itemId = findWatchIdByName(itemName);
+		if (itemId == null)
+		{
+			log.debug("Untradeable drop '{}' not on bingo watchlist ({} items)",
+				itemName, bingoWatchById.size());
+			return;
+		}
+		long price = itemManager.getItemPrice(itemId);
+		String name = bingoWatchById.getOrDefault(itemId, itemName);
+		send(EventPayload.builder()
+			.type(EventPayload.TYPE_LOOT)
+			.loot(new EventPayload.Loot(
+				name,
+				List.of(new EventPayload.LootItem(itemId, name, 1, price)),
+				Math.max(price, 0)))
+			.build(), false, null);
+	}
+
+	private Integer findWatchIdByName(String itemName)
+	{
+		for (Map.Entry<Integer, String> entry : bingoWatchById.entrySet())
+		{
+			if (entry.getValue() != null && entry.getValue().equalsIgnoreCase(itemName))
+			{
+				return entry.getKey();
+			}
+		}
+		return null;
+	}
+
+	// ---- Pets + bingo chat --------------------------------------------------------------------
 
 	@Subscribe
 	public void onChatMessage(ChatMessage event)
 	{
-		if (!config.petsEnabled() || event.getType() != ChatMessageType.GAMEMESSAGE)
+		if (event.getType() != ChatMessageType.GAMEMESSAGE)
 		{
 			return;
 		}
 		String message = Text.removeTags(event.getMessage());
+
+		if (config.bingoEnabled() && !bingoWatchById.isEmpty())
+		{
+			String dropName = UntradeableDrops.parseItemName(message);
+			if (dropName != null)
+			{
+				handleUntradeableBingoDrop(dropName);
+			}
+		}
+
+		if (!config.petsEnabled())
+		{
+			return;
+		}
 		PetMessages.Result result = PetMessages.classify(message);
 		if (result == PetMessages.Result.NONE)
 		{
@@ -427,7 +483,7 @@ public class CushtyPlugin extends Plugin
 			}
 			else
 			{
-				bingoWatchIds = Set.of();
+				bingoWatchById = Map.of();
 				CushtyPanel current = panel;
 				if (current != null)
 				{
@@ -441,7 +497,7 @@ public class CushtyPlugin extends Plugin
 	{
 		if (!config.bingoEnabled())
 		{
-			bingoWatchIds = Set.of();
+			bingoWatchById = Map.of();
 			return;
 		}
 		HttpUrl server = CushtyApiClient.parseServerUrl(config.serverUrl());
@@ -455,14 +511,24 @@ public class CushtyPlugin extends Plugin
 			@Override
 			public void onSuccess(BingoModels.Watchlist value)
 			{
-				if (value == null || value.getItems() == null)
+				if (value == null || value.getItems() == null || value.getItems().isEmpty())
 				{
-					bingoWatchIds = Set.of();
+					bingoWatchById = Map.of();
+					log.debug("Bingo watchlist empty (active={}, teamId={})",
+						value != null && value.isActive(),
+						value != null ? value.getTeamId() : null);
 					return;
 				}
-				bingoWatchIds = value.getItems().stream()
-					.map(BingoModels.WatchItem::getId)
-					.collect(Collectors.collectingAndThen(Collectors.toSet(), Collections::unmodifiableSet));
+				Map<Integer, String> next = new LinkedHashMap<>();
+				for (BingoModels.WatchItem item : value.getItems())
+				{
+					if (item != null)
+					{
+						next.put(item.getId(), item.getName() != null ? item.getName() : ("Item " + item.getId()));
+					}
+				}
+				bingoWatchById = Collections.unmodifiableMap(next);
+				log.debug("Bingo watchlist loaded: {} item(s)", bingoWatchById.size());
 			}
 
 			@Override
