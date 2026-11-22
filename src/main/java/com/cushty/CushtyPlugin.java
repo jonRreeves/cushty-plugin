@@ -496,13 +496,32 @@ public class CushtyPlugin extends Plugin
 			@Override
 			public void onSuccess(BingoModels.Board board)
 			{
-				CushtyPanel current = panel;
-				if (current != null)
+				api.fetchHistory(server, token, 40, new CushtyApiClient.ValueListener<BingoModels.History>()
 				{
-					current.showBingoBoard(board);
-				}
-				// Keep watchlist in sync when the player refreshes the board.
-				refreshBingoWatchlist();
+					@Override
+					public void onSuccess(BingoModels.History history)
+					{
+						CushtyPanel current = panel;
+						if (current != null)
+						{
+							current.showBingoBoard(board, history);
+						}
+						refreshBingoWatchlist();
+					}
+
+					@Override
+					public void onFailure(String message)
+					{
+						CushtyPanel current = panel;
+						if (current != null)
+						{
+							// Board still useful even if history fails.
+							current.showBingoBoard(board, null);
+						}
+						refreshBingoWatchlist();
+						log.debug("Bingo history refresh failed: {}", message);
+					}
+				});
 			}
 
 			@Override

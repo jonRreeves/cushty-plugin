@@ -60,4 +60,33 @@ public final class BingoModels
 		private int requiredQty;
 		private int progress;
 	}
+
+	@Data
+	public static class History
+	{
+		private int eventId;
+		private String eventName;
+		private int teamId;
+		private String teamName;
+		private List<HistoryEntry> entries = Collections.emptyList();
+	}
+
+	@Data
+	public static class HistoryEntry
+	{
+		private int id;
+		private int tileId;
+		private String tileName;
+		private int x;
+		private int y;
+		private int itemId;
+		private String itemName;
+		private int quantity;
+		private String status;
+		private String source;
+		private String discordId;
+		private long createdAt;
+		private Long reversedAt;
+		private String reversedBy;
+	}
 }

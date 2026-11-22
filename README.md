@@ -26,7 +26,7 @@ What else is included depends on the event:
 
 Nothing is sent on a timer, and nothing is sent while the features are off. **Test connection** calls the server you configured and does not upload a screenshot.
 
-With bingo on, the sidebar can **Refresh bingo board** to show your team's tile state. The item watchlist comes from the server — boards are never hardcoded in the plugin. An admin must assign you to a team in Discord first.
+With bingo on, the sidebar can **Refresh bingo board** to show your team's tile state and recent team submission history. The item watchlist comes from the server — boards are never hardcoded in the plugin. An admin must assign you to a team in Discord first.
 
 ## Boundaries
 

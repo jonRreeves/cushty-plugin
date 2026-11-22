@@ -4,6 +4,9 @@ import com.cushty.api.BingoModels;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.GridLayout;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.Comparator;
 import java.util.List;
 import java.util.function.Consumer;
@@ -23,6 +26,8 @@ import net.runelite.client.ui.PluginPanel;
 class CushtyPanel extends PluginPanel
 {
 	private static final int MAX_CAPTION = 500;
+	private static final DateTimeFormatter HISTORY_TIME =
+		DateTimeFormatter.ofPattern("dd MMM HH:mm").withZone(ZoneId.systemDefault());
 
 	private final JTextArea caption = new JTextArea(4, 20);
 	private final JButton sendButton = new JButton("Full screen");
@@ -30,7 +35,7 @@ class CushtyPanel extends PluginPanel
 	private final JButton testButton = new JButton("Test connection");
 	private final JButton refreshBingoButton = new JButton("Refresh bingo board");
 	private final JLabel bingoTitle = new JLabel("Bingo");
-	private final JTextArea bingoBoard = new JTextArea(8, 20);
+	private final JTextArea bingoBoard = new JTextArea(12, 20);
 	private final JLabel status = new JLabel();
 	private boolean busy;
 	private boolean snipping;
@@ -151,12 +156,16 @@ class CushtyPanel extends PluginPanel
 	}
 
 	/** Safe to call from any thread. */
-	void showBingoBoard(BingoModels.Board board)
+	void showBingoBoard(BingoModels.Board board, BingoModels.History history)
 	{
 		SwingUtilities.invokeLater(() ->
 		{
 			bingoTitle.setText(board.getEventName() + " — " + board.getTeamName());
-			bingoBoard.setText(formatBoard(board));
+			StringBuilder text = new StringBuilder(formatBoard(board));
+			text.append("\n\n-- Team history --\n");
+			text.append(formatHistory(history));
+			bingoBoard.setText(text.toString());
+			bingoBoard.setCaretPosition(0);
 		});
 	}
 
@@ -187,6 +196,7 @@ class CushtyPanel extends PluginPanel
 	private static String formatBoard(BingoModels.Board board)
 	{
 		StringBuilder sb = new StringBuilder();
+		sb.append(board.getWidth()).append('x').append(board.getHeight()).append(" board\n\n");
 		List<BingoModels.Tile> tiles = board.getTiles();
 		tiles.sort(Comparator.comparingInt(BingoModels.Tile::getY).thenComparingInt(BingoModels.Tile::getX));
 		int lastY = -1;
@@ -211,6 +221,36 @@ class CushtyPanel extends PluginPanel
 		long done = tiles.stream().filter(BingoModels.Tile::isComplete).count();
 		sb.append("\n\n").append(done).append('/').append(tiles.size()).append(" complete");
 		return sb.toString();
+	}
+
+	private static String formatHistory(BingoModels.History history)
+	{
+		if (history == null || history.getEntries() == null || history.getEntries().isEmpty())
+		{
+			return "No submissions yet.";
+		}
+		StringBuilder sb = new StringBuilder();
+		for (BingoModels.HistoryEntry entry : history.getEntries())
+		{
+			String when = HISTORY_TIME.format(Instant.ofEpochMilli(entry.getCreatedAt()));
+			String item = entry.getItemName() != null ? entry.getItemName() : ("item " + entry.getItemId());
+			String who = entry.getDiscordId() != null ? entry.getDiscordId() : "?";
+			sb.append(when)
+				.append("  ")
+				.append(entry.getStatus())
+				.append("  +")
+				.append(entry.getQuantity())
+				.append(' ')
+				.append(item)
+				.append(" @ ")
+				.append(entry.getTileName())
+				.append(" (")
+				.append(entry.getSource())
+				.append(", ")
+				.append(who)
+				.append(")\n");
+		}
+		return sb.toString().trim();
 	}
 
 	private static String escape(String text)

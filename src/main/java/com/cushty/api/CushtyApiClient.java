@@ -155,18 +155,47 @@ public class CushtyApiClient
 
 	public void fetchBoard(HttpUrl server, String token, ValueListener<BingoModels.Board> listener)
 	{
+		getJson(server, token, "v1/bingo/board", BingoModels.Board.class, listener, "bingo board");
+	}
+
+	public void fetchHistory(HttpUrl server, String token, int limit, ValueListener<BingoModels.History> listener)
+	{
+		HttpUrl url = server.newBuilder()
+			.addPathSegments("v1/bingo/history")
+			.addQueryParameter("limit", String.valueOf(limit))
+			.build();
 		Request request = new Request.Builder()
-			.url(server.newBuilder().addPathSegments("v1/bingo/board").build())
+			.url(url)
 			.header("Authorization", "Bearer " + token)
 			.get()
 			.build();
+		getJson(request, BingoModels.History.class, listener, "bingo history");
+	}
 
+	private <T> void getJson(
+		HttpUrl server,
+		String token,
+		String path,
+		Class<T> type,
+		ValueListener<T> listener,
+		String label)
+	{
+		Request request = new Request.Builder()
+			.url(server.newBuilder().addPathSegments(path).build())
+			.header("Authorization", "Bearer " + token)
+			.get()
+			.build();
+		getJson(request, type, listener, label);
+	}
+
+	private <T> void getJson(Request request, Class<T> type, ValueListener<T> listener, String label)
+	{
 		http.newCall(request).enqueue(new Callback()
 		{
 			@Override
 			public void onFailure(Call call, IOException e)
 			{
-				log.debug("Bingo board request failed", e);
+				log.debug("Bingo {} request failed", label, e);
 				listener.onFailure("Could not reach the Cushty server");
 			}
 
@@ -181,17 +210,17 @@ public class CushtyApiClient
 						listener.onFailure(messageFrom(raw, response.code()));
 						return;
 					}
-					BingoModels.Board board = gson.fromJson(raw, BingoModels.Board.class);
-					if (board == null)
+					T value = gson.fromJson(raw, type);
+					if (value == null)
 					{
-						listener.onFailure("Empty bingo board response");
+						listener.onFailure("Empty " + label + " response");
 						return;
 					}
-					listener.onSuccess(board);
+					listener.onSuccess(value);
 				}
 				catch (IOException | JsonParseException e)
 				{
-					listener.onFailure("Could not read bingo board");
+					listener.onFailure("Could not read " + label);
 				}
 			}
 		});
