@@ -29,6 +29,7 @@ import net.runelite.client.ui.PluginPanel;
 
 /**
  * Sidebar: Connection, Manual screenshots, and Bingo — kept simple for players in-game.
+ * RuneLite's font only has basic glyphs, so bingo text stays ASCII.
  */
 class CushtyPanel extends PluginPanel
 {
@@ -43,7 +44,8 @@ class CushtyPanel extends PluginPanel
 	private final JButton testButton = new JButton("Test connection");
 	private final JButton refreshBingoButton = new JButton("Refresh board");
 	private final JTextArea bingoBoard = new JTextArea(10, 20);
-	private final JLabel status = new JLabel();
+	/** Shown under Test connection (and reused for snip/send feedback). */
+	private final JLabel status = new JLabel(" ");
 	private boolean busy;
 	private boolean snipping;
 
@@ -56,6 +58,22 @@ class CushtyPanel extends PluginPanel
 		title.setFont(FontManager.getRunescapeBoldFont());
 		title.setForeground(Color.WHITE);
 		title.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+		// ---- Connection -----------------------------------------------------------------------
+		testButton.addActionListener(e -> onTest.run());
+		testButton.setAlignmentX(Component.LEFT_ALIGNMENT);
+		testButton.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+
+		status.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		status.setFont(FontManager.getRunescapeSmallFont());
+		status.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+		JPanel connectionBody = new JPanel();
+		connectionBody.setLayout(new BoxLayout(connectionBody, BoxLayout.Y_AXIS));
+		connectionBody.setOpaque(false);
+		connectionBody.add(testButton);
+		connectionBody.add(Box.createVerticalStrut(4));
+		connectionBody.add(status);
 
 		// ---- Manual screenshots ---------------------------------------------------------------
 		JLabel captionLabel = new JLabel("Caption (optional)");
@@ -73,8 +91,6 @@ class CushtyPanel extends PluginPanel
 
 		sendButton.addActionListener(e -> onSend.accept(caption()));
 		snipButton.addActionListener(e -> onSnip.run());
-		testButton.addActionListener(e -> onTest.run());
-		refreshBingoButton.addActionListener(e -> onRefreshBingo.run());
 
 		JPanel shotButtons = new JPanel(new GridLayout(0, 1, 0, 6));
 		shotButtons.add(sendButton);
@@ -91,13 +107,8 @@ class CushtyPanel extends PluginPanel
 		manualBody.add(Box.createVerticalStrut(6));
 		manualBody.add(shotButtons);
 
-		// ---- Connection -----------------------------------------------------------------------
-		JPanel connectionButtons = new JPanel(new GridLayout(0, 1, 0, 6));
-		connectionButtons.add(testButton);
-		connectionButtons.setAlignmentX(Component.LEFT_ALIGNMENT);
-		connectionButtons.setMaximumSize(new Dimension(Integer.MAX_VALUE, 32));
-
 		// ---- Bingo ----------------------------------------------------------------------------
+		refreshBingoButton.addActionListener(e -> onRefreshBingo.run());
 		bingoBoard.setEditable(false);
 		bingoBoard.setLineWrap(true);
 		bingoBoard.setWrapStyleWord(true);
@@ -107,7 +118,7 @@ class CushtyPanel extends PluginPanel
 		bingoBoard.setBorder(BorderFactory.createEmptyBorder(6, 6, 6, 6));
 		bingoBoard.setText(
 			"Turn on Bingo in settings, then refresh.\n\n"
-				+ "Drops for your team’s tiles are posted automatically.");
+				+ "Drops for your team's tiles are posted automatically.");
 		JScrollPane bingoScroll = new JScrollPane(bingoBoard);
 		bingoScroll.setBorder(BorderFactory.createLineBorder(ColorScheme.MEDIUM_GRAY_COLOR));
 		bingoScroll.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -122,22 +133,16 @@ class CushtyPanel extends PluginPanel
 		bingoBody.add(Box.createVerticalStrut(6));
 		bingoBody.add(bingoScroll);
 
-		status.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-		status.setFont(FontManager.getRunescapeSmallFont());
-		status.setAlignmentX(Component.LEFT_ALIGNMENT);
-
 		JPanel stack = new JPanel();
 		stack.setLayout(new BoxLayout(stack, BoxLayout.Y_AXIS));
 		stack.setOpaque(false);
 		stack.add(title);
 		stack.add(Box.createVerticalStrut(10));
-		stack.add(section("Connection", connectionButtons));
+		stack.add(section("Connection", connectionBody));
 		stack.add(Box.createVerticalStrut(10));
 		stack.add(section("Manual screenshots", manualBody));
 		stack.add(Box.createVerticalStrut(10));
 		stack.add(section("Bingo", bingoBody));
-		stack.add(Box.createVerticalStrut(8));
-		stack.add(status);
 
 		JScrollPane outer = new JScrollPane(stack);
 		outer.setBorder(BorderFactory.createEmptyBorder());
@@ -260,20 +265,20 @@ class CushtyPanel extends PluginPanel
 		StringBuilder sb = new StringBuilder();
 		sb.append(board.getEventName()).append('\n');
 		sb.append(board.getTeamName())
-			.append(" · ")
+			.append(" - ")
 			.append(board.getWidth())
-			.append('×')
+			.append('x')
 			.append(board.getHeight())
 			.append('\n');
-		sb.append(done).append('/').append(tiles.size()).append(" tiles done\n");
+		sb.append(done).append('/').append(tiles.size()).append(" tiles done\n\n");
 
 		int n = 1;
 		for (BingoModels.Tile tile : tiles)
 		{
-			sb.append(tile.isComplete() ? "✓ " : "· ")
+			sb.append(tile.isComplete() ? "[x] " : "[ ] ")
 				.append("Tile ")
 				.append(n++)
-				.append(" — ")
+				.append(" - ")
 				.append(tile.getName())
 				.append('\n');
 		}
@@ -306,14 +311,14 @@ class CushtyPanel extends PluginPanel
 			String line;
 			if (entry.getItemId() == 0)
 			{
-				line = when + " · Tile " + tileNum + " marked done";
+				line = when + " - Tile " + tileNum + " marked done";
 			}
 			else
 			{
 				String item = entry.getItemName() != null ? entry.getItemName() : ("item " + entry.getItemId());
-				line = when + " · +" + entry.getQuantity() + " " + item + " · Tile " + tileNum;
+				line = when + " - +" + entry.getQuantity() + " " + item + " - Tile " + tileNum;
 			}
-			sb.append("• ").append(line).append('\n');
+			sb.append("- ").append(line).append('\n');
 			shown++;
 		}
 		if (shown == 0)
