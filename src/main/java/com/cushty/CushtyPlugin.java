@@ -1,5 +1,6 @@
 package com.cushty;
 
+import com.cushty.api.BingoModels;
 import com.cushty.api.CushtyApiClient;
 import com.cushty.api.EventPayload;
 import com.cushty.capture.CaptureArea;
@@ -8,12 +9,14 @@ import com.cushty.capture.PrivateChatRedactor;
 import com.cushty.capture.ScreenshotCapture;
 import com.cushty.capture.SnipSelector;
 import com.cushty.loot.LootFilter;
+import com.cushty.loot.UntradeableDrops;
 import com.cushty.pets.PetMessages;
 import com.google.inject.Provides;
 import java.awt.Rectangle;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -56,8 +59,8 @@ import okhttp3.HttpUrl;
 @Slf4j
 @PluginDescriptor(
 	name = "Cushty",
-	description = "Share your drops, pets, and game-view screenshots with a clan Discord you configure",
-	tags = {"discord", "screenshot", "clan", "drops", "loot", "pet"}
+	description = "Share your drops, pets, bingo progress, and game-view screenshots with a clan Discord you configure",
+	tags = {"discord", "screenshot", "clan", "drops", "loot", "pet", "bingo"}
 )
 public class CushtyPlugin extends Plugin
 {
@@ -65,6 +68,8 @@ public class CushtyPlugin extends Plugin
 	private static final int MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
 	/** Wait a couple of ticks so the pet and the clan broadcast are visible in the shot. */
 	private static final int PET_CAPTURE_DELAY_TICKS = 2;
+	/** Refresh bingo watchlist from the server on this tick interval (~5 min at 0.6s/tick). */
+	private static final int BINGO_WATCHLIST_TICKS = 500;
 
 	@Inject
 	private Client client;
@@ -105,6 +110,9 @@ public class CushtyPlugin extends Plugin
 	private int pendingPetTicks;
 	/** Snip was requested and the mouse grab has not been installed yet. */
 	private volatile boolean snipPending;
+	/** Bingo watchlist from the server: item id → display name. */
+	private volatile Map<Integer, String> bingoWatchById = Map.of();
+	private int bingoWatchlistTicks;
 
 	private final HotkeyListener hotkeyListener = new HotkeyListener(() -> config.screenshotHotkey())
 	{
@@ -124,7 +132,11 @@ public class CushtyPlugin extends Plugin
 	@Override
 	protected void startUp()
 	{
-		panel = new CushtyPanel(caption -> sendManual(caption, true, null), this::onSnipButton, this::testConnection);
+		panel = new CushtyPanel(
+			caption -> sendManual(caption, true, null),
+			this::onSnipButton,
+			this::testConnection,
+			this::refreshBingoBoard);
 		panel.setSendLabel(config.captureArea().buttonLabel());
 		BufferedImage icon = ImageUtil.loadImageResource(getClass(), "icon.png");
 		navButton = NavigationButton.builder()
@@ -137,6 +149,8 @@ public class CushtyPlugin extends Plugin
 		keyManager.registerKeyListener(hotkeyListener);
 		keyManager.registerKeyListener(snipSelector.keys());
 		snipSelector.registerMouse();
+		bingoWatchlistTicks = 0;
+		refreshBingoWatchlist();
 	}
 
 	@Override
@@ -152,6 +166,7 @@ public class CushtyPlugin extends Plugin
 		navButton = null;
 		panel = null;
 		pendingPet = null;
+		bingoWatchById = Map.of();
 	}
 
 	// ---- Manual screenshots -------------------------------------------------------------------
@@ -296,8 +311,12 @@ public class CushtyPlugin extends Plugin
 	@Subscribe
 	public void onLootReceived(LootReceived event)
 	{
-		// NPC and player kills arrive via the events above; this covers chests, raids, pickpockets etc.
-		if (event.getType() == LootRecordType.EVENT || event.getType() == LootRecordType.PICKPOCKET)
+		// NPC/player kills use the handlers above. EVENT/PICKPOCKET/UNKNOWN cover chests,
+		// raids, reward pools, and odd sources the loot tracker does not classify.
+		LootRecordType type = event.getType();
+		if (type == LootRecordType.EVENT
+			|| type == LootRecordType.PICKPOCKET
+			|| type == LootRecordType.UNKNOWN)
 		{
 			handleLoot(event.getName(), event.getItems());
 		}
@@ -305,7 +324,9 @@ public class CushtyPlugin extends Plugin
 
 	private void handleLoot(String source, Collection<ItemStack> items)
 	{
-		if (!config.lootEnabled() || items.isEmpty())
+		boolean lootOn = config.lootEnabled();
+		boolean bingoOn = config.bingoEnabled();
+		if ((!lootOn && !bingoOn) || items.isEmpty())
 		{
 			return;
 		}
@@ -323,10 +344,19 @@ public class CushtyPlugin extends Plugin
 			quantity,
 			itemManager.getItemPrice(id))));
 
-		LootFilter filter = new LootFilter(config.lootMinValue());
+		Map<Integer, String> watchMap = bingoOn ? bingoWatchById : Map.of();
+		// Valuable-drop threshold only applies when loot is enabled; bingo-only mode still
+		// submits watchlist hits under 5M.
+		long minValue = lootOn ? config.lootMinValue() : Long.MAX_VALUE;
+		LootFilter filter = new LootFilter(minValue, watchMap.keySet());
 		LootFilter.Result result = filter.select(drop);
 		if (result.isEmpty())
 		{
+			if (bingoOn)
+			{
+				log.debug("Loot ignored (not valuable / not on bingo watchlist of {}): {}",
+					watchMap.size(), quantities.keySet());
+			}
 			return;
 		}
 
@@ -337,16 +367,63 @@ public class CushtyPlugin extends Plugin
 			.build(), false, null);
 	}
 
-	// ---- Pets ---------------------------------------------------------------------------------
+	/** Aerial fishing etc. announce {@code Untradeable drop: X} without a usable loot event. */
+	private void handleUntradeableBingoDrop(String itemName)
+	{
+		Integer itemId = findWatchIdByName(itemName);
+		if (itemId == null)
+		{
+			log.debug("Untradeable drop '{}' not on bingo watchlist ({} items)",
+				itemName, bingoWatchById.size());
+			return;
+		}
+		long price = itemManager.getItemPrice(itemId);
+		String name = bingoWatchById.getOrDefault(itemId, itemName);
+		send(EventPayload.builder()
+			.type(EventPayload.TYPE_LOOT)
+			.loot(new EventPayload.Loot(
+				name,
+				List.of(new EventPayload.LootItem(itemId, name, 1, price)),
+				Math.max(price, 0)))
+			.build(), false, null);
+	}
+
+	private Integer findWatchIdByName(String itemName)
+	{
+		for (Map.Entry<Integer, String> entry : bingoWatchById.entrySet())
+		{
+			if (entry.getValue() != null && entry.getValue().equalsIgnoreCase(itemName))
+			{
+				return entry.getKey();
+			}
+		}
+		return null;
+	}
+
+	// ---- Pets + bingo chat --------------------------------------------------------------------
 
 	@Subscribe
 	public void onChatMessage(ChatMessage event)
 	{
-		if (!config.petsEnabled() || event.getType() != ChatMessageType.GAMEMESSAGE)
+		if (event.getType() != ChatMessageType.GAMEMESSAGE)
 		{
 			return;
 		}
 		String message = Text.removeTags(event.getMessage());
+
+		if (config.bingoEnabled() && !bingoWatchById.isEmpty())
+		{
+			String dropName = UntradeableDrops.parseItemName(message);
+			if (dropName != null)
+			{
+				handleUntradeableBingoDrop(dropName);
+			}
+		}
+
+		if (!config.petsEnabled())
+		{
+			return;
+		}
 		PetMessages.Result result = PetMessages.classify(message);
 		if (result == PetMessages.Result.NONE)
 		{
@@ -368,6 +445,11 @@ public class CushtyPlugin extends Plugin
 			pendingPet = null;
 			send(pet, false, null);
 		}
+		if (config.bingoEnabled() && --bingoWatchlistTicks <= 0)
+		{
+			bingoWatchlistTicks = BINGO_WATCHLIST_TICKS;
+			refreshBingoWatchlist();
+		}
 	}
 
 	@Subscribe
@@ -379,15 +461,145 @@ public class CushtyPlugin extends Plugin
 	@Subscribe
 	public void onConfigChanged(ConfigChanged event)
 	{
-		if (!CushtyConfig.GROUP.equals(event.getGroup()) || !"captureArea".equals(event.getKey()))
+		if (!CushtyConfig.GROUP.equals(event.getGroup()))
 		{
 			return;
 		}
-		CushtyPanel current = panel;
-		if (current != null)
+		if ("captureArea".equals(event.getKey()))
 		{
-			current.setSendLabel(config.captureArea().buttonLabel());
+			CushtyPanel current = panel;
+			if (current != null)
+			{
+				current.setSendLabel(config.captureArea().buttonLabel());
+			}
 		}
+		if ("bingoEnabled".equals(event.getKey()))
+		{
+			if (config.bingoEnabled())
+			{
+				bingoWatchlistTicks = 0;
+				refreshBingoWatchlist();
+				refreshBingoBoard();
+			}
+			else
+			{
+				bingoWatchById = Map.of();
+				CushtyPanel current = panel;
+				if (current != null)
+				{
+					current.showBingoMessage("Bingo is turned off in settings.");
+				}
+			}
+		}
+	}
+
+	private void refreshBingoWatchlist()
+	{
+		if (!config.bingoEnabled())
+		{
+			bingoWatchById = Map.of();
+			return;
+		}
+		HttpUrl server = CushtyApiClient.parseServerUrl(config.serverUrl());
+		String token = config.token().trim();
+		if (server == null || token.isEmpty())
+		{
+			return;
+		}
+		api.fetchWatchlist(server, token, new CushtyApiClient.ValueListener<BingoModels.Watchlist>()
+		{
+			@Override
+			public void onSuccess(BingoModels.Watchlist value)
+			{
+				if (value == null || value.getItems() == null || value.getItems().isEmpty())
+				{
+					bingoWatchById = Map.of();
+					log.debug("Bingo watchlist empty (active={}, teamId={})",
+						value != null && value.isActive(),
+						value != null ? value.getTeamId() : null);
+					return;
+				}
+				Map<Integer, String> next = new LinkedHashMap<>();
+				for (BingoModels.WatchItem item : value.getItems())
+				{
+					if (item != null)
+					{
+						next.put(item.getId(), item.getName() != null ? item.getName() : ("Item " + item.getId()));
+					}
+				}
+				bingoWatchById = Collections.unmodifiableMap(next);
+				log.debug("Bingo watchlist loaded: {} item(s)", bingoWatchById.size());
+			}
+
+			@Override
+			public void onFailure(String message)
+			{
+				log.debug("Bingo watchlist refresh failed: {}", message);
+			}
+		});
+	}
+
+	private void refreshBingoBoard()
+	{
+		if (!config.bingoEnabled())
+		{
+			CushtyPanel current = panel;
+			if (current != null)
+			{
+				current.showBingoMessage("Turn on Bingo in the Cushty settings.");
+			}
+			return;
+		}
+		HttpUrl server = CushtyApiClient.parseServerUrl(config.serverUrl());
+		String token = config.token().trim();
+		if (server == null || token.isEmpty())
+		{
+			report("Set an HTTPS server URL and token first.", true);
+			return;
+		}
+		api.fetchBoard(server, token, new CushtyApiClient.ValueListener<BingoModels.Board>()
+		{
+			@Override
+			public void onSuccess(BingoModels.Board board)
+			{
+				api.fetchHistory(server, token, 40, new CushtyApiClient.ValueListener<BingoModels.History>()
+				{
+					@Override
+					public void onSuccess(BingoModels.History history)
+					{
+						CushtyPanel current = panel;
+						if (current != null)
+						{
+							current.showBingoBoard(board, history);
+						}
+						refreshBingoWatchlist();
+					}
+
+					@Override
+					public void onFailure(String message)
+					{
+						CushtyPanel current = panel;
+						if (current != null)
+						{
+							// Board still useful even if history fails.
+							current.showBingoBoard(board, null);
+						}
+						refreshBingoWatchlist();
+						log.debug("Bingo history refresh failed: {}", message);
+					}
+				});
+			}
+
+			@Override
+			public void onFailure(String message)
+			{
+				CushtyPanel current = panel;
+				if (current != null)
+				{
+					current.showBingoMessage(message);
+				}
+			}
+		});
 	}
 
 	// ---- Sending ------------------------------------------------------------------------------

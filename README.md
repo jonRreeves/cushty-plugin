@@ -22,8 +22,11 @@ What else is included depends on the event:
 | Manual screenshot | You press the hotkey, or Full screen / Chatbox / Snip on the sidebar | Optional caption you typed (500 characters). Snip is the area you drag. The other button follows Capture area. |
 | Valuable drop | A stack in the drop is worth at least your minimum (5M gp or more, Grand Exchange price) | Item id, name, quantity, GE price, and the drop source. On a player kill the source is that player's name, because that is the name on the loot event. |
 | Pet | The game announces a pet, including a duplicate | Duplicate or not, and the game message |
+| Bingo drop | **Enable bingo** is on, you are on a team, and the drop contains a watchlist item (any value, including untradables) | Same loot payload; the server matches items to your team's tiles. Aerial fishing “Untradeable drop: …” chat lines are also watched (e.g. Molch pearls). |
 
 Nothing is sent on a timer, and nothing is sent while the features are off. **Test connection** calls the server you configured and does not upload a screenshot.
+
+With bingo on, the sidebar can **Refresh bingo board** to show your team's tile state and recent team submission history. The item watchlist comes from the server — boards are never hardcoded in the plugin. An admin must assign you to a team in Discord first.
 
 ## Boundaries
 
