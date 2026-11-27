@@ -28,6 +28,7 @@ import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
+import net.runelite.api.NPC;
 import net.runelite.api.Player;
 import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameTick;
@@ -400,6 +401,43 @@ public class CushtyPlugin extends Plugin
 		return null;
 	}
 
+	/**
+	 * If bingo is on, try to map the new follower NPC to a watchlist pet item so the
+	 * server can auto-count OR-tiles that include pets.
+	 */
+	private void attachBingoPetItem(EventPayload payload)
+	{
+		if (!config.bingoEnabled() || bingoWatchById.isEmpty() || payload.getPet() == null)
+		{
+			return;
+		}
+		NPC follower = client.getFollower();
+		if (follower == null || follower.getName() == null)
+		{
+			return;
+		}
+		String petName = Text.removeTags(follower.getName());
+		Integer itemId = findWatchIdByName(petName);
+		if (itemId == null)
+		{
+			// Common board labels include a "Pet " prefix while the NPC name may not (or vice versa).
+			itemId = findWatchIdByName("Pet " + petName);
+		}
+		if (itemId == null && petName.regionMatches(true, 0, "Pet ", 0, 4))
+		{
+			itemId = findWatchIdByName(petName.substring(4).trim());
+		}
+		if (itemId == null)
+		{
+			log.debug("Bingo: pet follower '{}' not on watchlist", petName);
+			return;
+		}
+		String watchName = bingoWatchById.getOrDefault(itemId, petName);
+		payload.getPet().setItemId(itemId);
+		payload.getPet().setItemName(watchName);
+		log.debug("Bingo: pet matched watchlist {} ({})", watchName, itemId);
+	}
+
 	// ---- Pets + bingo chat --------------------------------------------------------------------
 
 	@Subscribe
@@ -443,6 +481,7 @@ public class CushtyPlugin extends Plugin
 		{
 			EventPayload pet = pendingPet;
 			pendingPet = null;
+			attachBingoPetItem(pet);
 			send(pet, false, null);
 		}
 		if (config.bingoEnabled() && --bingoWatchlistTicks <= 0)

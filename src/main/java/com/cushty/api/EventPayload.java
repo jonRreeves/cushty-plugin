@@ -52,10 +52,20 @@ public class EventPayload
 	}
 
 	@Data
+	@NoArgsConstructor
 	@AllArgsConstructor
 	public static class Pet
 	{
 		private boolean duplicate;
 		private String message;
+		/** Set when bingo matched the pet to a watchlist item (follower NPC name). */
+		private Integer itemId;
+		private String itemName;
+
+		public Pet(boolean duplicate, String message)
+		{
+			this.duplicate = duplicate;
+			this.message = message;
+		}
 	}
 }

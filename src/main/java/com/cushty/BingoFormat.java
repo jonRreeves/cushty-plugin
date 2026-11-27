@@ -89,24 +89,35 @@ final class BingoFormat
 
 	/**
 	 * Compact requirement summary, e.g. {@code Molch pearl}, {@code 0/5 Water Rune},
-	 * {@code A + B}, {@code A or B}.
+	 * {@code A + B}, {@code A or B}, {@code any 3 of: A, B, C}.
 	 */
 	static String summarizeRequirements(BingoModels.Tile tile)
 	{
-		List<List<BingoModels.TileItem>> groups = tile.getGroups();
+		List<BingoModels.TileGroup> groups = tile.getGroups();
 		if (groups == null || groups.isEmpty())
 		{
 			return null;
 		}
 		List<String> groupParts = new ArrayList<>();
-		for (List<BingoModels.TileItem> group : groups)
+		for (BingoModels.TileGroup group : groups)
 		{
-			if (group == null || group.isEmpty())
+			if (group == null || group.getItems() == null || group.getItems().isEmpty())
 			{
 				continue;
 			}
+			if ("pool".equalsIgnoreCase(group.getMode()))
+			{
+				int need = group.getPoolQty() != null ? group.getPoolQty() : group.getItems().size();
+				List<String> names = new ArrayList<>();
+				for (BingoModels.TileItem item : group.getItems())
+				{
+					names.add(item.getItemName() != null ? item.getItemName() : ("item " + item.getItemId()));
+				}
+				groupParts.add("any " + need + " of: " + String.join(", ", names));
+				continue;
+			}
 			List<String> andParts = new ArrayList<>();
-			for (BingoModels.TileItem item : group)
+			for (BingoModels.TileItem item : group.getItems())
 			{
 				andParts.add(formatItem(item, tile.isComplete()));
 			}
