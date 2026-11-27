@@ -49,7 +49,16 @@ public final class BingoModels
 		private int x;
 		private int y;
 		private boolean complete;
-		private List<List<TileItem>> groups = Collections.emptyList();
+		private List<TileGroup> groups = Collections.emptyList();
+	}
+
+	@Data
+	public static class TileGroup
+	{
+		/** {@code all} (AND) or {@code pool} (any N of these items). */
+		private String mode = "all";
+		private Integer poolQty;
+		private List<TileItem> items = Collections.emptyList();
 	}
 
 	@Data
